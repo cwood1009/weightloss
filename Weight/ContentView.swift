@@ -54,6 +54,10 @@ final class TrackerDataStore: ObservableObject {
     @Published var profiles: [TrackerUserProfile]
     @Published var entries: [Date: [UUID: TrackerDayEntry]]
     @Published var showKidVariants: Bool
+    @Published var syncStepsFromHealth: Bool
+    @Published var pushWeightToHealth: Bool
+    @Published var cloudSyncEnabled: Bool
+    @Published var sharedRollupsEnabled: Bool
     let mealTemplates: [TrackerMealTemplate]
     let recipes: [TrackerRecipe]
 
@@ -66,6 +70,10 @@ final class TrackerDataStore: ObservableObject {
         self.profiles = [chris, jill]
         self.entries = [:]
         self.showKidVariants = false
+        self.syncStepsFromHealth = true
+        self.pushWeightToHealth = true
+        self.cloudSyncEnabled = false
+        self.sharedRollupsEnabled = true
 
         let oatsRecipe = TrackerRecipe(
             id: UUID(),
@@ -121,6 +129,14 @@ final class TrackerDataStore: ObservableObject {
         ]
 
         self.mealTemplates = templateSeed
+    }
+
+    func setPrimaryProfile(id: UUID) {
+        profiles = profiles.map { profile in
+            var updated = profile
+            updated.isPrimary = profile.id == id
+            return updated
+        }
     }
 
     func dayEntry(for user: TrackerUserProfile, on date: Date) -> TrackerDayEntry {
@@ -525,6 +541,11 @@ struct WeekView: View {
                 }
 
                 WeekRollupView(rollup: rollup)
+
+                if store.sharedRollupsEnabled {
+                    SharedRollupList(selectedUserId: selectedUser.id)
+                        .environmentObject(store)
+                }
             }
             .padding()
         }
@@ -573,6 +594,73 @@ struct WeekRollupView: View {
         .padding()
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var weightTrendText: String {
+        guard let change = rollup.weightChange else { return "--" }
+        let symbol = change >= 0 ? "+" : ""
+        return "\(symbol)\(change, specifier: "%.1f") lb"
+    }
+}
+
+struct SharedRollupList: View {
+    @EnvironmentObject var store: TrackerDataStore
+    var selectedUserId: UUID
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Shared roll-ups")
+                .font(.headline)
+                .padding(.top, 4)
+
+            Text("See each profile's week when cloud sync is enabled or you're both connected to Health.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(store.profiles) { profile in
+                let entries = store.entriesForLastWeek(for: profile, endingOn: Date())
+                let rollup = WeekRollup(entries: entries, targetWater: profile.targetWaterOz)
+                SharedRollupRow(profile: profile, rollup: rollup, isCurrentUser: profile.id == selectedUserId)
+            }
+        }
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct SharedRollupRow: View {
+    var profile: TrackerUserProfile
+    var rollup: WeekRollup
+    var isCurrentUser: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(profile.name, systemImage: profile.isPrimary ? "person.fill.checkmark" : "person")
+                    .font(.subheadline)
+                    .foregroundStyle(isCurrentUser ? .primary : .secondary)
+                Spacer()
+                if isCurrentUser {
+                    Text("Viewing")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+
+            HStack(spacing: 8) {
+                StatPill(title: "Workouts", value: "\(rollup.workouts)", icon: "dumbbell.fill", color: .orange)
+                StatPill(title: "Meals", value: "\(rollup.mealsLogged)", icon: "checklist", color: .green)
+            }
+
+            HStack(spacing: 8) {
+                StatPill(title: "Avg Water", value: String(format: "%.0f oz", rollup.averageWater), icon: "drop.fill", color: .blue)
+                StatPill(title: "Weight", value: weightTrendText, icon: "scalemass.fill", color: .purple)
+            }
+        }
     }
 
     private var weightTrendText: String {
@@ -747,11 +835,28 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
+                Picker("Primary profile", selection: Binding(
+                    get: { store.profiles.first(where: { $0.isPrimary })?.id ?? store.profiles.first?.id ?? UUID() },
+                    set: { newValue in store.setPrimaryProfile(id: newValue) }
+                )) {
+                    ForEach(store.profiles) { profile in
+                        Text(profile.name).tag(profile.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
                 ProfileEditor(profile: $store.profiles[selectedUserIndex])
             }
 
             Section("Options") {
                 Toggle("Show kid variants", isOn: $store.showKidVariants)
+            }
+
+            Section("Integrations") {
+                Toggle("Sync steps from Health", isOn: $store.syncStepsFromHealth)
+                Toggle("Write weight to Health", isOn: $store.pushWeightToHealth)
+                Toggle("Enable iCloud sync", isOn: $store.cloudSyncEnabled)
+                Toggle("Share roll-ups between profiles", isOn: $store.sharedRollupsEnabled)
             }
         }
         .navigationTitle("Settings")
@@ -766,15 +871,23 @@ struct ProfileEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Target calories", value: $profile.targetCalories, formatter: NumberFormatter())
+            TextField("Target calories", value: $profile.targetCalories, format: .number)
                 .keyboardType(.numberPad)
                 .focused($focusedField, equals: .calories)
-            TextField("Target water (oz)", value: $profile.targetWaterOz, formatter: NumberFormatter())
+            TextField("Target water (oz)", value: $profile.targetWaterOz, format: .number)
                 .keyboardType(.numberPad)
                 .focused($focusedField, equals: .water)
-            TextField("Target weight", value: $profile.targetWeight, format: .number)
+            TextField("Target weight", value: $profile.targetWeight, format: .number.precision(.fractionLength(1)))
                 .keyboardType(.decimalPad)
                 .focused($focusedField, equals: .targetWeight)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+            }
         }
     }
 }
