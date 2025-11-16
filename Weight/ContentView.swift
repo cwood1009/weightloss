@@ -8,7 +8,7 @@
 import SwiftUI
 import Combine
 
-struct UserProfile: Identifiable, Hashable {
+struct TrackerUserProfile: Identifiable, Hashable {
     let id: UUID
     var name: String
     var targetCalories: Int
@@ -18,7 +18,7 @@ struct UserProfile: Identifiable, Hashable {
     var isPrimary: Bool
 }
 
-struct DayEntry: Identifiable {
+struct TrackerDayEntry: Identifiable {
     let id: UUID
     var date: Date
     var userId: UUID
@@ -30,7 +30,7 @@ struct DayEntry: Identifiable {
     var notes: String?
 }
 
-struct MealTemplate: Identifiable {
+struct TrackerMealTemplate: Identifiable {
     let id: UUID
     var dayOfWeek: String
     var mealType: String
@@ -41,7 +41,7 @@ struct MealTemplate: Identifiable {
     var recipeId: UUID?
 }
 
-struct Recipe: Identifiable {
+struct TrackerRecipe: Identifiable {
     let id: UUID
     var title: String
     var category: String
@@ -50,24 +50,24 @@ struct Recipe: Identifiable {
     var notes: String
 }
 
-final class DataStore: ObservableObject {
-    @Published var profiles: [UserProfile]
-    @Published var entries: [Date: [UUID: DayEntry]]
+final class TrackerDataStore: ObservableObject {
+    @Published var profiles: [TrackerUserProfile]
+    @Published var entries: [Date: [UUID: TrackerDayEntry]]
     @Published var showKidVariants: Bool
-    let mealTemplates: [MealTemplate]
-    let recipes: [Recipe]
+    let mealTemplates: [TrackerMealTemplate]
+    let recipes: [TrackerRecipe]
 
     private let calendar = Calendar.current
 
     init() {
-        let chris = UserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: 96, targetWeight: 185, startingWeight: 198, isPrimary: true)
-        let jill = UserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: 90, targetWeight: 145, startingWeight: 155, isPrimary: false)
+        let chris = TrackerUserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: 96, targetWeight: 185, startingWeight: 198, isPrimary: true)
+        let jill = TrackerUserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: 90, targetWeight: 145, startingWeight: 155, isPrimary: false)
 
         self.profiles = [chris, jill]
         self.entries = [:]
         self.showKidVariants = false
 
-        let oatsRecipe = Recipe(
+        let oatsRecipe = TrackerRecipe(
             id: UUID(),
             title: "Blueberry Overnight Oats",
             category: "Breakfast",
@@ -76,7 +76,7 @@ final class DataStore: ObservableObject {
             notes: "Prep 2 jars at once for Jill's early mornings."
         )
 
-        let tacoRecipe = Recipe(
+        let tacoRecipe = TrackerRecipe(
             id: UUID(),
             title: "Sheet-Pan Chicken Tacos",
             category: "Dinner",
@@ -85,7 +85,7 @@ final class DataStore: ObservableObject {
             notes: "Kids version uses mild seasoning and shredded cheese."
         )
 
-        let saladRecipe = Recipe(
+        let saladRecipe = TrackerRecipe(
             id: UUID(),
             title: "Mediterranean Power Salad",
             category: "Lunch",
@@ -96,40 +96,40 @@ final class DataStore: ObservableObject {
 
         self.recipes = [oatsRecipe, tacoRecipe, saladRecipe]
 
-        let templateSeed: [MealTemplate] = [
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Breakfast", title: "Protein Oats", description: "Oats + berries + protein powder", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Quinoa, greens, olives", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Dinner", title: "Sheet-Pan Chicken Tacos", description: "Peppers, onions, salsa", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Breakfast", title: "Greek Yogurt Parfait", description: "Granola + berries", isJillVariant: true, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Lunch", title: "Leftover Tacos", description: "Warm and wrap", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Dinner", title: "Salmon + Roasted Veg", description: "Sheet pan and chill", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Breakfast", title: "Egg + Avocado Toast", description: "Jill swap: cottage cheese toast", isJillVariant: true, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Add beans for extra fiber", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Dinner", title: "Slow Cooker Chili", description: "Kid bowl with cheese", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Breakfast", title: "Blueberry Overnight Oats", description: "Add peanut butter for Chris", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Lunch", title: "Chicken Wraps", description: "Spinach + hummus", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Dinner", title: "Pork Tenderloin", description: "Serve with green beans", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Breakfast", title: "Protein Smoothie", description: "Spinach + banana", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Lunch", title: "Leftover Pork Bowls", description: "Add rice + veg", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Dinner", title: "Pizza Night", description: "Side salad for Jill", isJillVariant: true, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Breakfast", title: "Egg + Veg Scramble", description: "Salsa + avocado", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Lunch", title: "BBQ Chicken Sandwiches", description: "Slaw + pickles", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Dinner", title: "Date Night", description: "Eat out", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Breakfast", title: "Pancakes + Fruit", description: "Protein pancakes for Chris", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Lunch", title: "Snack Plates", description: "Hummus, veg, crackers", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Dinner", title: "Roast Chicken", description: "Leftovers for salads", isJillVariant: false, isKidVariant: true, recipeId: nil)
+        let templateSeed: [TrackerMealTemplate] = [
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Breakfast", title: "Protein Oats", description: "Oats + berries + protein powder", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Quinoa, greens, olives", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Dinner", title: "Sheet-Pan Chicken Tacos", description: "Peppers, onions, salsa", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Breakfast", title: "Greek Yogurt Parfait", description: "Granola + berries", isJillVariant: true, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Lunch", title: "Leftover Tacos", description: "Warm and wrap", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Dinner", title: "Salmon + Roasted Veg", description: "Sheet pan and chill", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Breakfast", title: "Egg + Avocado Toast", description: "Jill swap: cottage cheese toast", isJillVariant: true, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Add beans for extra fiber", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Dinner", title: "Slow Cooker Chili", description: "Kid bowl with cheese", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Breakfast", title: "Blueberry Overnight Oats", description: "Add peanut butter for Chris", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Lunch", title: "Chicken Wraps", description: "Spinach + hummus", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Dinner", title: "Pork Tenderloin", description: "Serve with green beans", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Breakfast", title: "Protein Smoothie", description: "Spinach + banana", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Lunch", title: "Leftover Pork Bowls", description: "Add rice + veg", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Dinner", title: "Pizza Night", description: "Side salad for Jill", isJillVariant: true, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Breakfast", title: "Egg + Veg Scramble", description: "Salsa + avocado", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Lunch", title: "BBQ Chicken Sandwiches", description: "Slaw + pickles", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Dinner", title: "Date Night", description: "Eat out", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Breakfast", title: "Pancakes + Fruit", description: "Protein pancakes for Chris", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Lunch", title: "Snack Plates", description: "Hummus, veg, crackers", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Dinner", title: "Roast Chicken", description: "Leftovers for salads", isJillVariant: false, isKidVariant: true, recipeId: nil)
         ]
 
         self.mealTemplates = templateSeed
     }
 
-    func dayEntry(for user: UserProfile, on date: Date) -> DayEntry {
+    func dayEntry(for user: TrackerUserProfile, on date: Date) -> TrackerDayEntry {
         let normalized = calendar.startOfDay(for: date)
         if let existing = entries[normalized]?[user.id] {
             return existing
         }
 
-        let entry = DayEntry(
+        let entry = TrackerDayEntry(
             id: UUID(),
             date: normalized,
             userId: user.id,
@@ -145,14 +145,14 @@ final class DataStore: ObservableObject {
         return entry
     }
 
-    func updateDayEntry(for user: UserProfile, on date: Date, update: (inout DayEntry) -> Void) {
+    func updateDayEntry(for user: TrackerUserProfile, on date: Date, update: (inout TrackerDayEntry) -> Void) {
         let normalized = calendar.startOfDay(for: date)
         var entry = dayEntry(for: user, on: date)
         update(&entry)
         entries[normalized, default: [:]][user.id] = entry
     }
 
-    func entriesForLastWeek(for user: UserProfile, endingOn date: Date) -> [DayEntry] {
+    func entriesForLastWeek(for user: TrackerUserProfile, endingOn date: Date) -> [TrackerDayEntry] {
         let normalized = calendar.startOfDay(for: date)
         let days = (0..<7).compactMap { offset -> Date? in
             calendar.date(byAdding: .day, value: -offset, to: normalized)
@@ -161,177 +161,18 @@ final class DataStore: ObservableObject {
         return days.map { dayEntry(for: user, on: $0) }.sorted { $0.date < $1.date }
     }
 
-    func recipe(for id: UUID?) -> Recipe? {
-        guard let id else { return nil }
-        return recipes.first { $0.id == id }
-    }
-}
-
-struct UserProfile: Identifiable, Hashable {
-    let id: UUID
-    var name: String
-    var targetCalories: Int
-    var targetWaterOz: Int
-    var targetWeight: Double
-    var startingWeight: Double
-    var isPrimary: Bool
-}
-
-struct DayEntry: Identifiable {
-    let id: UUID
-    var date: Date
-    var userId: UUID
-    var weight: Double?
-    var didWorkout: Bool
-    var mealsLogged: Bool
-    var stepGoalHit: Bool
-    var waterOunces: Double
-    var notes: String?
-}
-
-struct MealTemplate: Identifiable {
-    let id: UUID
-    var dayOfWeek: String
-    var mealType: String
-    var title: String
-    var description: String
-    var isJillVariant: Bool
-    var isKidVariant: Bool
-    var recipeId: UUID?
-}
-
-struct Recipe: Identifiable {
-    let id: UUID
-    var title: String
-    var category: String
-    var ingredients: String
-    var instructions: String
-    var notes: String
-}
-
-final class DataStore: ObservableObject {
-    @Published var profiles: [UserProfile]
-    @Published var entries: [Date: [UUID: DayEntry]]
-    @Published var showKidVariants: Bool
-    let mealTemplates: [MealTemplate]
-    let recipes: [Recipe]
-
-    private let calendar = Calendar.current
-
-    init() {
-        let chris = UserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: 96, targetWeight: 185, startingWeight: 198, isPrimary: true)
-        let jill = UserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: 90, targetWeight: 145, startingWeight: 155, isPrimary: false)
-
-        self.profiles = [chris, jill]
-        self.entries = [:]
-        self.showKidVariants = false
-
-        let oatsRecipe = Recipe(
-            id: UUID(),
-            title: "Blueberry Overnight Oats",
-            category: "Breakfast",
-            ingredients: "Rolled oats, almond milk, chia seeds, maple syrup, blueberries",
-            instructions: "Combine ingredients in a jar, chill overnight, top with berries and nuts.",
-            notes: "Prep 2 jars at once for Jill's early mornings."
-        )
-
-        let tacoRecipe = Recipe(
-            id: UUID(),
-            title: "Sheet-Pan Chicken Tacos",
-            category: "Dinner",
-            ingredients: "Chicken thighs, peppers, onions, taco seasoning, tortillas, salsa",
-            instructions: "Season chicken and veggies, roast at 425°F for 20 minutes, serve with warm tortillas.",
-            notes: "Kids version uses mild seasoning and shredded cheese."
-        )
-
-        let saladRecipe = Recipe(
-            id: UUID(),
-            title: "Mediterranean Power Salad",
-            category: "Lunch",
-            ingredients: "Mixed greens, quinoa, cucumbers, tomatoes, olives, feta, lemon vinaigrette",
-            instructions: "Layer greens and grains, add veggies, toss with vinaigrette before serving.",
-            notes: "Great with leftover grilled chicken."
-        )
-
-        self.recipes = [oatsRecipe, tacoRecipe, saladRecipe]
-
-        let templateSeed: [MealTemplate] = [
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Breakfast", title: "Protein Oats", description: "Oats + berries + protein powder", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Quinoa, greens, olives", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Dinner", title: "Sheet-Pan Chicken Tacos", description: "Peppers, onions, salsa", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Breakfast", title: "Greek Yogurt Parfait", description: "Granola + berries", isJillVariant: true, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Lunch", title: "Leftover Tacos", description: "Warm and wrap", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Dinner", title: "Salmon + Roasted Veg", description: "Sheet pan and chill", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Breakfast", title: "Egg + Avocado Toast", description: "Jill swap: cottage cheese toast", isJillVariant: true, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Add beans for extra fiber", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Dinner", title: "Slow Cooker Chili", description: "Kid bowl with cheese", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Breakfast", title: "Blueberry Overnight Oats", description: "Add peanut butter for Chris", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Lunch", title: "Chicken Wraps", description: "Spinach + hummus", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
-            MealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Dinner", title: "Pork Tenderloin", description: "Serve with green beans", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Breakfast", title: "Protein Smoothie", description: "Spinach + banana", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Lunch", title: "Leftover Pork Bowls", description: "Add rice + veg", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Dinner", title: "Pizza Night", description: "Side salad for Jill", isJillVariant: true, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Breakfast", title: "Egg + Veg Scramble", description: "Salsa + avocado", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Lunch", title: "BBQ Chicken Sandwiches", description: "Slaw + pickles", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Dinner", title: "Date Night", description: "Eat out", isJillVariant: false, isKidVariant: false, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Breakfast", title: "Pancakes + Fruit", description: "Protein pancakes for Chris", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Lunch", title: "Snack Plates", description: "Hummus, veg, crackers", isJillVariant: false, isKidVariant: true, recipeId: nil),
-            MealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Dinner", title: "Roast Chicken", description: "Leftovers for salads", isJillVariant: false, isKidVariant: true, recipeId: nil)
-        ]
-
-        self.mealTemplates = templateSeed
-    }
-
-    func dayEntry(for user: UserProfile, on date: Date) -> DayEntry {
-        let normalized = calendar.startOfDay(for: date)
-        if let existing = entries[normalized]?[user.id] {
-            return existing
-        }
-
-        let entry = DayEntry(
-            id: UUID(),
-            date: normalized,
-            userId: user.id,
-            weight: nil,
-            didWorkout: false,
-            mealsLogged: false,
-            stepGoalHit: false,
-            waterOunces: 0,
-            notes: nil
-        )
-
-        entries[normalized, default: [:]][user.id] = entry
-        return entry
-    }
-
-    func updateDayEntry(for user: UserProfile, on date: Date, update: (inout DayEntry) -> Void) {
-        let normalized = calendar.startOfDay(for: date)
-        var entry = dayEntry(for: user, on: date)
-        update(&entry)
-        entries[normalized, default: [:]][user.id] = entry
-    }
-
-    func entriesForLastWeek(for user: UserProfile, endingOn date: Date) -> [DayEntry] {
-        let normalized = calendar.startOfDay(for: date)
-        let days = (0..<7).compactMap { offset -> Date? in
-            calendar.date(byAdding: .day, value: -offset, to: normalized)
-        }
-
-        return days.map { dayEntry(for: user, on: $0) }.sorted { $0.date < $1.date }
-    }
-
-    func recipe(for id: UUID?) -> Recipe? {
+    func recipe(for id: UUID?) -> TrackerRecipe? {
         guard let id else { return nil }
         return recipes.first { $0.id == id }
     }
 }
 
 struct ContentView: View {
-    @StateObject private var store = DataStore()
+    @StateObject private var store = TrackerDataStore()
     @State private var selectedDate = Date()
     @State private var selectedUserIndex = 0
 
-    private var selectedUser: UserProfile {
+    private var selectedUser: TrackerUserProfile {
         store.profiles[selectedUserIndex]
     }
 
@@ -373,11 +214,11 @@ struct ContentView: View {
 }
 
 struct TodayView: View {
-    @EnvironmentObject var store: DataStore
+    @EnvironmentObject var store: TrackerDataStore
     @Binding var selectedDate: Date
     @Binding var selectedUserIndex: Int
 
-    var selectedUser: UserProfile { store.profiles[selectedUserIndex] }
+    var selectedUser: TrackerUserProfile { store.profiles[selectedUserIndex] }
 
     var body: some View {
         ScrollView {
@@ -442,8 +283,8 @@ struct TodayView: View {
 }
 
 struct WeightCard: View {
-    var entry: DayEntry
-    var user: UserProfile
+    var entry: TrackerDayEntry
+    var user: TrackerUserProfile
     var onUpdate: (Double?) -> Void
     @State private var weightText: String = ""
 
@@ -492,8 +333,8 @@ struct WeightCard: View {
 }
 
 struct ComplianceToggles: View {
-    var entry: DayEntry
-    var onToggle: (WritableKeyPath<DayEntry, Bool>, Bool) -> Void
+    var entry: TrackerDayEntry
+    var onToggle: (WritableKeyPath<TrackerDayEntry, Bool>, Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -528,7 +369,7 @@ struct ComplianceToggles: View {
 }
 
 struct HydrationTracker: View {
-    var entry: DayEntry
+    var entry: TrackerDayEntry
     var target: Int
     var onUpdate: (Int) -> Void
 
@@ -577,9 +418,9 @@ struct HydrationTracker: View {
 struct TodayMealsCard: View {
     var dayOfWeek: String
     var showKidVariants: Bool
-    var templates: [MealTemplate]
-    var recipeProvider: (MealTemplate) -> Recipe?
-    @State private var selectedTemplate: MealTemplate?
+    var templates: [TrackerMealTemplate]
+    var recipeProvider: (TrackerMealTemplate) -> TrackerRecipe?
+    @State private var selectedTemplate: TrackerMealTemplate?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -629,16 +470,16 @@ struct TodayMealsCard: View {
         }
     }
 
-    private var filteredTemplates: [MealTemplate] {
+    private var filteredTemplates: [TrackerMealTemplate] {
         templates.filter { $0.dayOfWeek == dayOfWeek && (showKidVariants || !$0.isKidVariant) }
     }
 }
 
 struct WeekView: View {
-    @EnvironmentObject var store: DataStore
+    @EnvironmentObject var store: TrackerDataStore
     @Binding var selectedUserIndex: Int
 
-    var selectedUser: UserProfile { store.profiles[selectedUserIndex] }
+    var selectedUser: TrackerUserProfile { store.profiles[selectedUserIndex] }
 
     var body: some View {
         let entries = store.entriesForLastWeek(for: selectedUser, endingOn: Date())
@@ -697,7 +538,7 @@ struct WeekRollup {
     var averageWater: Double
     var weightChange: Double?
 
-    init(entries: [DayEntry], targetWater: Int) {
+    init(entries: [TrackerDayEntry], targetWater: Int) {
         workouts = entries.filter { $0.didWorkout }.count
         mealsLogged = entries.filter { $0.mealsLogged }.count
         let totalWater = entries.reduce(0) { $0 + $1.waterOunces }
@@ -768,9 +609,9 @@ struct StatPill: View {
 }
 
 struct MealPlanView: View {
-    @EnvironmentObject var store: DataStore
+    @EnvironmentObject var store: TrackerDataStore
     @Binding var selectedUserIndex: Int
-    @State private var selectedTemplate: MealTemplate?
+    @State private var selectedTemplate: TrackerMealTemplate?
 
     var body: some View {
         let grouped = Dictionary(grouping: store.mealTemplates) { $0.dayOfWeek }
@@ -784,7 +625,7 @@ struct MealPlanView: View {
             }
             .pickerStyle(.segmented)
 
-            ForEach(sortedDays, id: \ .self) { day in
+            ForEach(sortedDays, id: \.self) { day in
                 if let meals = grouped[day] {
                     Section(dayFullName(day)) {
                         ForEach(meals.filter { store.showKidVariants || !$0.isKidVariant }) { template in
@@ -808,7 +649,7 @@ struct MealPlanView: View {
 }
 
 struct MealRow: View {
-    var template: MealTemplate
+    var template: TrackerMealTemplate
 
     var body: some View {
         HStack {
@@ -840,8 +681,8 @@ struct MealRow: View {
 }
 
 struct MealDetailView: View {
-    var template: MealTemplate
-    var recipe: Recipe?
+    var template: TrackerMealTemplate
+    var recipe: TrackerRecipe?
 
     var body: some View {
         NavigationStack {
@@ -893,7 +734,7 @@ struct MealDetailView: View {
 }
 
 struct SettingsView: View {
-    @EnvironmentObject var store: DataStore
+    @EnvironmentObject var store: TrackerDataStore
     @Binding var selectedUserIndex: Int
 
     var body: some View {
@@ -918,7 +759,7 @@ struct SettingsView: View {
 }
 
 struct ProfileEditor: View {
-    @Binding var profile: UserProfile
+    @Binding var profile: TrackerUserProfile
     @FocusState private var focusedField: Field?
 
     enum Field { case calories, water, targetWeight }
