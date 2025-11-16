@@ -25,9 +25,12 @@ struct TrackerDayEntry: Identifiable {
     var weight: Double?
     var didWorkout: Bool
     var mealsLogged: Bool
-    var stepGoalHit: Bool
+    var steps: Int
+    var stepGoal: Int
     var waterOunces: Double
     var notes: String?
+
+    var stepGoalHit: Bool { steps >= stepGoal }
 }
 
 struct TrackerMealTemplate: Identifiable {
@@ -131,6 +134,15 @@ final class TrackerDataStore: ObservableObject {
         self.mealTemplates = templateSeed
     }
 
+    func syncHealthSteps(for user: TrackerUserProfile, on date: Date) {
+        guard syncStepsFromHealth else { return }
+
+        let simulated = Int.random(in: 800...12_000)
+        updateDayEntry(for: user, on: date) { entry in
+            entry.steps = simulated
+        }
+    }
+
     func setPrimaryProfile(id: UUID) {
         profiles = profiles.map { profile in
             var updated = profile
@@ -152,7 +164,8 @@ final class TrackerDataStore: ObservableObject {
             weight: nil,
             didWorkout: false,
             mealsLogged: false,
-            stepGoalHit: false,
+            steps: 1200,
+            stepGoal: 9000,
             waterOunces: 0,
             notes: nil
         )
@@ -260,10 +273,14 @@ struct TodayView: View {
                     }
                 }
 
-                ComplianceToggles(entry: entry) { keyPath, value in
+                ComplianceToggles(entry: entry) { newValue in
                     store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
-                        entry[keyPath: keyPath] = value
+                        entry.didWorkout = newValue
                     }
+                }
+
+                StepsProgressCard(entry: entry, syncingFromHealth: store.syncStepsFromHealth) {
+                    store.syncHealthSteps(for: selectedUser, on: selectedDate)
                 }
 
                 HydrationTracker(entry: entry, target: selectedUser.targetWaterOz) { servings in
@@ -272,7 +289,11 @@ struct TodayView: View {
                     }
                 }
 
-                TodayMealsCard(dayOfWeek: selectedDate.shortWeekday, showKidVariants: store.showKidVariants, templates: store.mealTemplates) { template in
+                TodayMealsCard(dayOfWeek: selectedDate.shortWeekday, mealsLogged: entry.mealsLogged, showKidVariants: store.showKidVariants, templates: store.mealTemplates, onMealsLoggedChange: { isOn in
+                    store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
+                        entry.mealsLogged = isOn
+                    }
+                }) { template in
                     store.recipe(for: template.recipeId)
                 }
             }
@@ -350,7 +371,7 @@ struct WeightCard: View {
 
 struct ComplianceToggles: View {
     var entry: TrackerDayEntry
-    var onToggle: (WritableKeyPath<TrackerDayEntry, Bool>, Bool) -> Void
+    var onToggle: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -359,28 +380,76 @@ struct ComplianceToggles: View {
 
             Toggle(isOn: Binding(
                 get: { entry.didWorkout },
-                set: { onToggle(\.didWorkout, $0) }
+                set: { onToggle($0) }
             )) {
-                Label("Workout", systemImage: entry.didWorkout ? "dumbbell.fill" : "dumbbell")
-            }
-
-            Toggle(isOn: Binding(
-                get: { entry.mealsLogged },
-                set: { onToggle(\.mealsLogged, $0) }
-            )) {
-                Label("Meals logged", systemImage: entry.mealsLogged ? "checkmark.seal.fill" : "checkmark.seal")
-            }
-
-            Toggle(isOn: Binding(
-                get: { entry.stepGoalHit },
-                set: { onToggle(\.stepGoalHit, $0) }
-            )) {
-                Label("Steps goal", systemImage: entry.stepGoalHit ? "figure.walk.circle.fill" : "figure.walk.circle")
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Workout", systemImage: entry.didWorkout ? "dumbbell.fill" : "dumbbell")
+                    Text("Today's plan: \(TodayWorkoutPlan.plan(for: entry.date.shortWeekday))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct StepsProgressCard: View {
+    var entry: TrackerDayEntry
+    var syncingFromHealth: Bool
+    var onSync: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Steps", systemImage: "figure.walk")
+                Spacer()
+                if syncingFromHealth {
+                    Label("Health on", systemImage: "waveform.path.ecg")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text("\(entry.steps) / \(entry.stepGoal) suggested")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ProgressView(value: Double(entry.steps), total: Double(entry.stepGoal))
+
+            Button(action: onSync) {
+                Label("Refresh from Health", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+enum TodayWorkoutPlan {
+    static func plan(for weekday: String) -> String {
+        switch weekday {
+        case "Mon":
+            return "Upper body strength"
+        case "Tue":
+            return "Zone 2 walk + core"
+        case "Wed":
+            return "Lower body strength"
+        case "Thu":
+            return "Intervals or peloton"
+        case "Fri":
+            return "Full-body lift"
+        case "Sat":
+            return "Family walk or hike"
+        case "Sun":
+            return "Mobility + stretch"
+        default:
+            return "Movement day"
+        }
     }
 }
 
@@ -433,15 +502,29 @@ struct HydrationTracker: View {
 
 struct TodayMealsCard: View {
     var dayOfWeek: String
+    var mealsLogged: Bool
     var showKidVariants: Bool
     var templates: [TrackerMealTemplate]
+    var onMealsLoggedChange: (Bool) -> Void
     var recipeProvider: (TrackerMealTemplate) -> TrackerRecipe?
     @State private var selectedTemplate: TrackerMealTemplate?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Today's planned meals")
-                .font(.headline)
+            HStack {
+                Text("Today's planned meals")
+                    .font(.headline)
+                Spacer()
+                Toggle("Logged", isOn: Binding(
+                    get: { mealsLogged },
+                    set: { onMealsLoggedChange($0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                Label("Meals logged", systemImage: mealsLogged ? "checkmark.seal.fill" : "checkmark.seal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             ForEach(filteredTemplates) { template in
                 Button {
@@ -599,7 +682,7 @@ struct WeekRollupView: View {
     private var weightTrendText: String {
         guard let change = rollup.weightChange else { return "--" }
         let symbol = change >= 0 ? "+" : ""
-        return "\(symbol)\(String(format: "%.1f", change)) lb"
+        return "\(symbol)\(change, specifier: "%.1f") lb"
     }
 }
 
@@ -666,7 +749,7 @@ struct SharedRollupRow: View {
     private var weightTrendText: String {
         guard let change = rollup.weightChange else { return "--" }
         let symbol = change >= 0 ? "+" : ""
-        return "\(symbol)\(String(format: "%.1f", change)) lb"
+        return "\(symbol)\(change, specifier: "%.1f") lb"
     }
 }
 
