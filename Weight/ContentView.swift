@@ -27,6 +27,7 @@ struct TrackerDayEntry: Identifiable {
     var mealsLogged: Bool
     var steps: Int
     var stepGoal: Int
+    var completedMealIds: Set<UUID>
     var waterOunces: Double
     var notes: String?
 
@@ -67,8 +68,8 @@ final class TrackerDataStore: ObservableObject {
     private let calendar = Calendar.current
 
     init() {
-        let chris = TrackerUserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: 96, targetWeight: 185, startingWeight: 198, isPrimary: true)
-        let jill = TrackerUserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: 90, targetWeight: 145, startingWeight: 155, isPrimary: false)
+        let chris = TrackerUserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: Self.suggestedWater(for: 198), targetWeight: 185, startingWeight: 198, isPrimary: true)
+        let jill = TrackerUserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: Self.suggestedWater(for: 155), targetWeight: 145, startingWeight: 155, isPrimary: false)
 
         self.profiles = [chris, jill]
         self.entries = [:]
@@ -134,12 +135,16 @@ final class TrackerDataStore: ObservableObject {
         self.mealTemplates = templateSeed
     }
 
+    private static func suggestedWater(for weight: Double) -> Int {
+        Int((weight * 0.5).rounded())
+    }
+
     func syncHealthSteps(for user: TrackerUserProfile, on date: Date) {
         guard syncStepsFromHealth else { return }
 
-        let simulated = Int.random(in: 800...12_000)
+        let sampled = HealthStepSampler.sampleSteps(for: user, on: date, goal: dayEntry(for: user, on: date).stepGoal)
         updateDayEntry(for: user, on: date) { entry in
-            entry.steps = simulated
+            entry.steps = sampled
         }
     }
 
@@ -166,6 +171,7 @@ final class TrackerDataStore: ObservableObject {
             mealsLogged: false,
             steps: 1200,
             stepGoal: 9000,
+            completedMealIds: [],
             waterOunces: 0,
             notes: nil
         )
@@ -193,6 +199,18 @@ final class TrackerDataStore: ObservableObject {
     func recipe(for id: UUID?) -> TrackerRecipe? {
         guard let id else { return nil }
         return recipes.first { $0.id == id }
+    }
+}
+
+struct HealthStepSampler {
+    static func sampleSteps(for user: TrackerUserProfile, on date: Date, goal: Int) -> Int {
+        let calendar = Calendar.current
+        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 0
+        let nameOffset = abs(user.name.hashValue % 2000)
+        let base = max(1500, goal - 3000)
+        let fluctuation = (dayOfYear * 137) % 2500
+        let total = base + nameOffset / 2 + fluctuation
+        return min(goal + 2000, total)
     }
 }
 
@@ -289,13 +307,33 @@ struct TodayView: View {
                     }
                 }
 
-                TodayMealsCard(dayOfWeek: selectedDate.shortWeekday, mealsLogged: entry.mealsLogged, showKidVariants: store.showKidVariants, templates: store.mealTemplates, onMealsLoggedChange: { isOn in
-                    store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
-                        entry.mealsLogged = isOn
+                TodayMealsCard(
+                    dayOfWeek: selectedDate.shortWeekday,
+                    mealsLogged: entry.mealsLogged,
+                    completedMeals: entry.completedMealIds,
+                    showKidVariants: store.showKidVariants,
+                    templates: store.mealTemplates,
+                    onMealsLoggedChange: { isOn in
+                        store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
+                            entry.mealsLogged = isOn
+                        }
+                    },
+                    onMealToggle: { template, isCompleted in
+                        store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
+                            if isCompleted {
+                                entry.completedMealIds.insert(template.id)
+                            } else {
+                                entry.completedMealIds.remove(template.id)
+                            }
+
+                            let todaysMeals = store.mealTemplates.filter { $0.dayOfWeek == selectedDate.shortWeekday && (store.showKidVariants || !$0.isKidVariant) }
+                            entry.mealsLogged = todaysMeals.allSatisfy { entry.completedMealIds.contains($0.id) }
+                        }
+                    },
+                    recipeProvider: { template in
+                        store.recipe(for: template.recipeId)
                     }
-                }) { template in
-                    store.recipe(for: template.recipeId)
-                }
+                )
             }
             .padding()
         }
@@ -348,9 +386,22 @@ struct WeightCard: View {
             if let currentWeight = entry.weight {
                 let delta = currentWeight - user.startingWeight
                 let symbol = delta >= 0 ? "+" : ""
-                Text("Change from start: \(symbol)\(delta, specifier: "%.1f") lb")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Change from start: \(symbol)\(delta, specifier: "%.1f") lb")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    let totalGoal = user.startingWeight - user.targetWeight
+                    let progress = totalGoal != 0 ? (user.startingWeight - currentWeight) / totalGoal : 0
+                    ProgressView(value: max(0, min(progress, 1))) {
+                        Text("Progress to target")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("You've lost \(max(0, user.startingWeight - currentWeight), specifier: "%.1f") lb so far")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()
@@ -385,6 +436,9 @@ struct ComplianceToggles: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Workout", systemImage: entry.didWorkout ? "dumbbell.fill" : "dumbbell")
                     Text("Today's plan: \(TodayWorkoutPlan.plan(for: entry.date.shortWeekday))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(TodayWorkoutPlan.detail(for: entry.date.shortWeekday))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -451,6 +505,27 @@ enum TodayWorkoutPlan {
             return "Movement day"
         }
     }
+
+    static func detail(for weekday: String) -> String {
+        switch weekday {
+        case "Mon":
+            return "Bench + rows, finish with 10-minute core."
+        case "Tue":
+            return "45-minute walk; 3x plank, dead bug, side plank."
+        case "Wed":
+            return "Squats, hinges, and split squats with light sled pushes."
+        case "Thu":
+            return "10 x 1-min pushes on the bike with 1-min recoveries."
+        case "Fri":
+            return "Compound lifts (press, hinge, squat) and band pull-aparts."
+        case "Sat":
+            return "Family cardio — stroller walk or easy hike."
+        case "Sun":
+            return "20-minute mobility flow: hips, hamstrings, T-spine."
+        default:
+            return "Stay loose with a short walk and stretching."
+        }
+    }
 }
 
 struct HydrationTracker: View {
@@ -503,9 +578,11 @@ struct HydrationTracker: View {
 struct TodayMealsCard: View {
     var dayOfWeek: String
     var mealsLogged: Bool
+    var completedMeals: Set<UUID>
     var showKidVariants: Bool
     var templates: [TrackerMealTemplate]
     var onMealsLoggedChange: (Bool) -> Void
+    var onMealToggle: (TrackerMealTemplate, Bool) -> Void
     var recipeProvider: (TrackerMealTemplate) -> TrackerRecipe?
     @State private var selectedTemplate: TrackerMealTemplate?
 
@@ -527,37 +604,47 @@ struct TodayMealsCard: View {
             }
 
             ForEach(filteredTemplates) { template in
-                Button {
-                    selectedTemplate = template
-                } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(template.mealType)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(template.title)
-                                .font(.body)
-                            Text(template.description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if template.isJillVariant {
-                            Label("Jill", systemImage: "heart")
-                                .labelStyle(.iconOnly)
-                                .foregroundStyle(.pink)
-                                .help("Jill's variant")
-                        }
-                        if template.isKidVariant && showKidVariants {
-                            Label("Kids", systemImage: "figure.and.child.holdinghands")
-                                .labelStyle(.iconOnly)
-                                .foregroundStyle(.teal)
-                        }
+                HStack(alignment: .center, spacing: 8) {
+                    Button {
+                        let isCompleted = completedMeals.contains(template.id)
+                        onMealToggle(template, !isCompleted)
+                    } label: {
+                        Image(systemName: completedMeals.contains(template.id) ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(completedMeals.contains(template.id) ? .green : .secondary)
                     }
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .buttonStyle(.plain)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(template.mealType)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(template.title)
+                            .font(.body)
+                        Text(template.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if template.isJillVariant {
+                        Label("Jill", systemImage: "heart")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.pink)
+                            .help("Jill's variant")
+                    }
+                    if template.isKidVariant && showKidVariants {
+                        Label("Kids", systemImage: "figure.and.child.holdinghands")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.teal)
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedTemplate = template
                 }
             }
         }
@@ -950,19 +1037,36 @@ struct ProfileEditor: View {
     @Binding var profile: TrackerUserProfile
     @FocusState private var focusedField: Field?
 
-    enum Field { case calories, water, targetWeight }
+    enum Field { case calories, startingWeight, targetWeight }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Target calories", value: $profile.targetCalories, format: .number)
-                .keyboardType(.numberPad)
-                .focused($focusedField, equals: .calories)
-            TextField("Target water (oz)", value: $profile.targetWaterOz, format: .number)
-                .keyboardType(.numberPad)
-                .focused($focusedField, equals: .water)
-            TextField("Target weight", value: $profile.targetWeight, format: .number.precision(.fractionLength(1)))
-                .keyboardType(.decimalPad)
-                .focused($focusedField, equals: .targetWeight)
+            Text("Targets & baselines")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("Starting weight") {
+                TextField("Starting weight", value: $profile.startingWeight, format: .number.precision(.fractionLength(1)))
+                    .keyboardType(.decimalPad)
+                    .focused($focusedField, equals: .startingWeight)
+            }
+
+            LabeledContent("Target weight") {
+                TextField("Target weight", value: $profile.targetWeight, format: .number.precision(.fractionLength(1)))
+                    .keyboardType(.decimalPad)
+                    .focused($focusedField, equals: .targetWeight)
+            }
+
+            LabeledContent("Target calories") {
+                TextField("Target calories", value: $profile.targetCalories, format: .number)
+                    .keyboardType(.numberPad)
+                    .focused($focusedField, equals: .calories)
+            }
+
+            LabeledContent("Water target") {
+                Text("\(profile.targetWaterOz) oz (auto: 1/2 body weight)")
+                    .foregroundStyle(.secondary)
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -971,6 +1075,9 @@ struct ProfileEditor: View {
                     focusedField = nil
                 }
             }
+        }
+        .onChange(of: profile.startingWeight) { newValue in
+            profile.targetWaterOz = Int((newValue * 0.5).rounded())
         }
     }
 }
