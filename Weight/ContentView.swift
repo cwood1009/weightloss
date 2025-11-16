@@ -682,7 +682,7 @@ struct WeekRollupView: View {
     private var weightTrendText: String {
         guard let change = rollup.weightChange else { return "--" }
         let symbol = change >= 0 ? "+" : ""
-        return "\(symbol)\(change, specifier: "%.1f") lb"
+        return String(format: "%@%.1f lb", symbol, change)
     }
 }
 
@@ -749,7 +749,7 @@ struct SharedRollupRow: View {
     private var weightTrendText: String {
         guard let change = rollup.weightChange else { return "--" }
         let symbol = change >= 0 ? "+" : ""
-        return "\(symbol)\(change, specifier: "%.1f") lb"
+        return String(format: "%@%.1f lb", symbol, change)
     }
 }
 
