@@ -7,6 +7,9 @@
 
 import SwiftUI
 import Combine
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 struct TrackerUserProfile: Identifiable, Hashable {
     let id: UUID
@@ -64,6 +67,8 @@ final class TrackerDataStore: ObservableObject {
     @Published var sharedRollupsEnabled: Bool
     let mealTemplates: [TrackerMealTemplate]
     let recipes: [TrackerRecipe]
+
+    private let healthManager = HealthKitManager()
 
     private let calendar = Calendar.current
 
@@ -142,9 +147,32 @@ final class TrackerDataStore: ObservableObject {
     func syncHealthSteps(for user: TrackerUserProfile, on date: Date) {
         guard syncStepsFromHealth else { return }
 
-        let sampled = HealthStepSampler.sampleSteps(for: user, on: date, goal: dayEntry(for: user, on: date).stepGoal)
+        healthManager.requestAuthorizationIfNeeded { [weak self] granted in
+            guard let self, granted else { return }
+
+            self.healthManager.fetchSteps(for: date) { [weak self] steps in
+                guard let self, let steps else { return }
+
+                DispatchQueue.main.async {
+                    self.updateDayEntry(for: user, on: date) { entry in
+                        entry.steps = steps
+                    }
+                }
+            }
+        }
+    }
+
+    func setWeight(_ weight: Double, for user: TrackerUserProfile, on date: Date) {
         updateDayEntry(for: user, on: date) { entry in
-            entry.steps = sampled
+            entry.weight = weight
+        }
+
+        guard pushWeightToHealth else { return }
+
+        healthManager.requestAuthorizationIfNeeded { [weak self] granted in
+            guard let self, granted else { return }
+
+            self.healthManager.saveWeight(weight, on: date) { _ in }
         }
     }
 
@@ -202,16 +230,96 @@ final class TrackerDataStore: ObservableObject {
     }
 }
 
-struct HealthStepSampler {
-    static func sampleSteps(for user: TrackerUserProfile, on date: Date, goal: Int) -> Int {
-        let calendar = Calendar.current
-        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 0
-        let nameOffset = abs(user.name.hashValue % 2000)
-        let base = max(1500, goal - 3000)
-        let fluctuation = (dayOfYear * 137) % 2500
-        let total = base + nameOffset / 2 + fluctuation
-        return min(goal + 2000, total)
+final class HealthKitManager {
+#if canImport(HealthKit)
+    private let healthStore = HKHealthStore()
+    private var hasRequestedAuth = false
+
+    func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion(false)
+            return
+        }
+
+        if hasRequestedAuth {
+            completion(true)
+            return
+        }
+
+        guard
+            let stepType = HKObjectType.quantityType(forIdentifier: .stepCount),
+            let weightType = HKObjectType.quantityType(forIdentifier: .bodyMass)
+        else {
+            completion(false)
+            return
+        }
+
+        let read: Set = [stepType, weightType]
+        let write: Set = [weightType]
+
+        healthStore.requestAuthorization(toShare: write, read: read) { [weak self] success, _ in
+            DispatchQueue.main.async {
+                if success {
+                    self?.hasRequestedAuth = true
+                }
+                completion(success)
+            }
+        }
     }
+
+    func fetchSteps(for date: Date, completion: @escaping (Int?) -> Void) {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            completion(nil)
+            return
+        }
+
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            completion(nil)
+            return
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+
+        let query = HKStatisticsQuery(quantityType: stepType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+            let steps = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+            DispatchQueue.main.async {
+                completion(Int(steps))
+            }
+        }
+
+        healthStore.execute(query)
+    }
+
+    func saveWeight(_ pounds: Double, on date: Date, completion: @escaping (Bool) -> Void) {
+        guard let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) else {
+            completion(false)
+            return
+        }
+
+        let quantity = HKQuantity(unit: HKUnit.pound(), doubleValue: pounds)
+        let sample = HKQuantitySample(type: weightType, quantity: quantity, start: date, end: date)
+
+        healthStore.save(sample) { success, _ in
+            DispatchQueue.main.async {
+                completion(success)
+            }
+        }
+    }
+#else
+    func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        completion(false)
+    }
+
+    func fetchSteps(for date: Date, completion: @escaping (Int?) -> Void) {
+        completion(nil)
+    }
+
+    func saveWeight(_ pounds: Double, on date: Date, completion: @escaping (Bool) -> Void) {
+        completion(false)
+    }
+#endif
 }
 
 struct ContentView: View {
@@ -286,9 +394,7 @@ struct TodayView: View {
                 let entry = store.dayEntry(for: selectedUser, on: selectedDate)
 
                 WeightCard(entry: entry, user: selectedUser) { newWeight in
-                    store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
-                        entry.weight = newWeight
-                    }
+                    store.setWeight(newWeight, for: selectedUser, on: selectedDate)
                 }
 
                 ComplianceToggles(entry: entry) { newValue in
