@@ -1,4 +1,319 @@
 import SwiftUI
+import Combine
+#if canImport(HealthKit)
+import HealthKit
+#endif
+
+struct TrackerUserProfile: Identifiable, Hashable {
+    let id: UUID
+    var name: String
+    var targetCalories: Int
+    var targetWaterOz: Int
+    var targetWeight: Double
+    var startingWeight: Double
+    var isPrimary: Bool
+}
+
+struct TrackerDayEntry: Identifiable {
+    let id: UUID
+    var date: Date
+    var userId: UUID
+    var weight: Double?
+    var didWorkout: Bool
+    var mealsLogged: Bool
+    var steps: Int
+    var stepGoal: Int
+    var completedMealIds: Set<UUID>
+    var waterOunces: Double
+    var notes: String?
+
+    var stepGoalHit: Bool { steps >= stepGoal }
+}
+
+struct TrackerMealTemplate: Identifiable {
+    let id: UUID
+    var dayOfWeek: String
+    var mealType: String
+    var title: String
+    var description: String
+    var isJillVariant: Bool
+    var isKidVariant: Bool
+    var recipeId: UUID?
+}
+
+struct TrackerRecipe: Identifiable {
+    let id: UUID
+    var title: String
+    var category: String
+    var ingredients: String
+    var instructions: String
+    var notes: String
+}
+
+final class TrackerDataStore: ObservableObject {
+    @Published var profiles: [TrackerUserProfile]
+    @Published var entries: [Date: [UUID: TrackerDayEntry]]
+    @Published var showKidVariants: Bool
+    @Published var syncStepsFromHealth: Bool
+    @Published var pushWeightToHealth: Bool
+    @Published var cloudSyncEnabled: Bool
+    @Published var sharedRollupsEnabled: Bool
+    let mealTemplates: [TrackerMealTemplate]
+    let recipes: [TrackerRecipe]
+
+    private let healthManager = HealthKitManager()
+
+    private let calendar = Calendar.current
+
+    init() {
+        let chris = TrackerUserProfile(id: UUID(), name: "Chris", targetCalories: 2100, targetWaterOz: Self.suggestedWater(for: 198), targetWeight: 185, startingWeight: 198, isPrimary: true)
+        let jill = TrackerUserProfile(id: UUID(), name: "Jill", targetCalories: 1700, targetWaterOz: Self.suggestedWater(for: 155), targetWeight: 145, startingWeight: 155, isPrimary: false)
+
+        self.profiles = [chris, jill]
+        self.entries = [:]
+        self.showKidVariants = false
+        self.syncStepsFromHealth = true
+        self.pushWeightToHealth = true
+        self.cloudSyncEnabled = false
+        self.sharedRollupsEnabled = true
+
+        let oatsRecipe = TrackerRecipe(
+            id: UUID(),
+            title: "Blueberry Overnight Oats",
+            category: "Breakfast",
+            ingredients: "Rolled oats, almond milk, chia seeds, maple syrup, blueberries",
+            instructions: "Combine ingredients in a jar, chill overnight, top with berries and nuts.",
+            notes: "Prep 2 jars at once for Jill's early mornings."
+        )
+
+        let tacoRecipe = TrackerRecipe(
+            id: UUID(),
+            title: "Sheet-Pan Chicken Tacos",
+            category: "Dinner",
+            ingredients: "Chicken thighs, peppers, onions, taco seasoning, tortillas, salsa",
+            instructions: "Season chicken and veggies, roast at 425°F for 20 minutes, serve with warm tortillas.",
+            notes: "Kids version uses mild seasoning and shredded cheese."
+        )
+
+        let saladRecipe = TrackerRecipe(
+            id: UUID(),
+            title: "Mediterranean Power Salad",
+            category: "Lunch",
+            ingredients: "Mixed greens, quinoa, cucumbers, tomatoes, olives, feta, lemon vinaigrette",
+            instructions: "Layer greens and grains, add veggies, toss with vinaigrette before serving.",
+            notes: "Great with leftover grilled chicken."
+        )
+
+        self.recipes = [oatsRecipe, tacoRecipe, saladRecipe]
+
+        let templateSeed: [TrackerMealTemplate] = [
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Breakfast", title: "Protein Oats", description: "Oats + berries + protein powder", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Quinoa, greens, olives", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Mon", mealType: "Dinner", title: "Sheet-Pan Chicken Tacos", description: "Peppers, onions, salsa", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Breakfast", title: "Greek Yogurt Parfait", description: "Granola + berries", isJillVariant: true, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Lunch", title: "Leftover Tacos", description: "Warm and wrap", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Tue", mealType: "Dinner", title: "Salmon + Roasted Veg", description: "Sheet pan and chill", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Breakfast", title: "Egg + Avocado Toast", description: "Jill swap: cottage cheese toast", isJillVariant: true, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Lunch", title: "Mediterranean Power Salad", description: "Add beans for extra fiber", isJillVariant: false, isKidVariant: false, recipeId: saladRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Wed", mealType: "Dinner", title: "Slow Cooker Chili", description: "Kid bowl with cheese", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Breakfast", title: "Blueberry Overnight Oats", description: "Add peanut butter for Chris", isJillVariant: false, isKidVariant: false, recipeId: oatsRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Lunch", title: "Chicken Wraps", description: "Spinach + hummus", isJillVariant: false, isKidVariant: false, recipeId: tacoRecipe.id),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Thu", mealType: "Dinner", title: "Pork Tenderloin", description: "Serve with green beans", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Breakfast", title: "Protein Smoothie", description: "Spinach + banana", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Lunch", title: "Leftover Pork Bowls", description: "Add rice + veg", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Fri", mealType: "Dinner", title: "Pizza Night", description: "Side salad for Jill", isJillVariant: true, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Breakfast", title: "Egg + Veg Scramble", description: "Salsa + avocado", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Lunch", title: "BBQ Chicken Sandwiches", description: "Slaw + pickles", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sat", mealType: "Dinner", title: "Date Night", description: "Eat out", isJillVariant: false, isKidVariant: false, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Breakfast", title: "Pancakes + Fruit", description: "Protein pancakes for Chris", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Lunch", title: "Snack Plates", description: "Hummus, veg, crackers", isJillVariant: false, isKidVariant: true, recipeId: nil),
+            TrackerMealTemplate(id: UUID(), dayOfWeek: "Sun", mealType: "Dinner", title: "Roast Chicken", description: "Leftovers for salads", isJillVariant: false, isKidVariant: true, recipeId: nil)
+        ]
+
+        self.mealTemplates = templateSeed
+    }
+
+    private static func suggestedWater(for weight: Double) -> Int {
+        Int((weight * 0.5).rounded())
+    }
+
+    func syncHealthSteps(for user: TrackerUserProfile, on date: Date) {
+        guard syncStepsFromHealth else { return }
+
+        healthManager.requestAuthorizationIfNeeded { [weak self] granted in
+            guard let self, granted else { return }
+
+            self.healthManager.fetchSteps(for: date) { [weak self] steps in
+                guard let self, let steps else { return }
+
+                DispatchQueue.main.async {
+                    self.updateDayEntry(for: user, on: date) { entry in
+                        entry.steps = steps
+                    }
+                }
+            }
+        }
+    }
+
+    func setWeight(_ weight: Double, for user: TrackerUserProfile, on date: Date) {
+        updateDayEntry(for: user, on: date) { entry in
+            entry.weight = weight
+        }
+
+        guard pushWeightToHealth else { return }
+
+        healthManager.requestAuthorizationIfNeeded { [weak self] granted in
+            guard let self, granted else { return }
+
+            self.healthManager.saveWeight(weight, on: date) { _ in }
+        }
+    }
+
+    func setPrimaryProfile(id: UUID) {
+        profiles = profiles.map { profile in
+            var updated = profile
+            updated.isPrimary = profile.id == id
+            return updated
+        }
+    }
+
+    func dayEntry(for user: TrackerUserProfile, on date: Date) -> TrackerDayEntry {
+        let normalized = calendar.startOfDay(for: date)
+        if let existing = entries[normalized]?[user.id] {
+            return existing
+        }
+
+        let entry = TrackerDayEntry(
+            id: UUID(),
+            date: normalized,
+            userId: user.id,
+            weight: nil,
+            didWorkout: false,
+            mealsLogged: false,
+            steps: 1200,
+            stepGoal: 9000,
+            completedMealIds: [],
+            waterOunces: 0,
+            notes: nil
+        )
+
+        entries[normalized, default: [:]][user.id] = entry
+        return entry
+    }
+
+    func updateDayEntry(for user: TrackerUserProfile, on date: Date, update: (inout TrackerDayEntry) -> Void) {
+        let normalized = calendar.startOfDay(for: date)
+        var entry = dayEntry(for: user, on: date)
+        update(&entry)
+        entries[normalized, default: [:]][user.id] = entry
+    }
+
+    func entriesForLastWeek(for user: TrackerUserProfile, endingOn date: Date) -> [TrackerDayEntry] {
+        let normalized = calendar.startOfDay(for: date)
+        let days = (0..<7).compactMap { offset -> Date? in
+            calendar.date(byAdding: .day, value: -offset, to: normalized)
+        }
+
+        return days.map { dayEntry(for: user, on: $0) }.sorted { $0.date < $1.date }
+    }
+
+    func recipe(for id: UUID?) -> TrackerRecipe? {
+        guard let id else { return nil }
+        return recipes.first { $0.id == id }
+    }
+}
+
+final class HealthKitManager {
+#if canImport(HealthKit)
+    private let healthStore = HKHealthStore()
+    private var hasRequestedAuth = false
+
+    func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion(false)
+            return
+        }
+
+        if hasRequestedAuth {
+            completion(true)
+            return
+        }
+
+        guard
+            let stepType = HKObjectType.quantityType(forIdentifier: .stepCount),
+            let weightType = HKObjectType.quantityType(forIdentifier: .bodyMass)
+        else {
+            completion(false)
+            return
+        }
+
+        let read: Set = [stepType, weightType]
+        let write: Set = [weightType]
+
+        healthStore.requestAuthorization(toShare: write, read: read) { [weak self] success, _ in
+            DispatchQueue.main.async {
+                if success {
+                    self?.hasRequestedAuth = true
+                }
+                completion(success)
+            }
+        }
+    }
+
+    func fetchSteps(for date: Date, completion: @escaping (Int?) -> Void) {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            completion(nil)
+            return
+        }
+
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            completion(nil)
+            return
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+
+        let query = HKStatisticsQuery(quantityType: stepType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+            let steps = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+            DispatchQueue.main.async {
+                completion(Int(steps))
+            }
+        }
+
+        healthStore.execute(query)
+    }
+
+    func saveWeight(_ pounds: Double, on date: Date, completion: @escaping (Bool) -> Void) {
+        guard let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) else {
+            completion(false)
+            return
+        }
+
+        let quantity = HKQuantity(unit: HKUnit.pound(), doubleValue: pounds)
+        let sample = HKQuantitySample(type: weightType, quantity: quantity, start: date, end: date)
+
+        healthStore.save(sample) { success, _ in
+            DispatchQueue.main.async {
+                completion(success)
+            }
+        }
+    }
+#else
+    func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        completion(false)
+    }
+
+    func fetchSteps(for date: Date, completion: @escaping (Int?) -> Void) {
+        completion(nil)
+    }
+
+    func saveWeight(_ pounds: Double, on date: Date, completion: @escaping (Bool) -> Void) {
+        completion(false)
+    }
+#endif
+}
 
 struct ContentView: View {
     @StateObject private var store = TrackerDataStore()
@@ -81,19 +396,9 @@ struct TodayView: View {
                     }
                 }
 
-                StepsProgressCard(
-                    entry: entry,
-                    authorizationState: store.healthAuthorizationState,
-                    syncingFromHealth: store.syncStepsFromHealth,
-                    onRequestPermission: {
-                        store.requestHealthAuthorization {
-                            store.syncHealthSteps(for: selectedUser, on: selectedDate)
-                        }
-                    },
-                    onSync: {
-                        store.syncHealthSteps(for: selectedUser, on: selectedDate)
-                    }
-                )
+                StepsProgressCard(entry: entry, syncingFromHealth: store.syncStepsFromHealth) {
+                    store.syncHealthSteps(for: selectedUser, on: selectedDate)
+                }
 
                 HydrationTracker(entry: entry, target: selectedUser.targetWaterOz) { servings in
                     store.updateDayEntry(for: selectedUser, on: selectedDate) { entry in
@@ -246,9 +551,7 @@ struct ComplianceToggles: View {
 
 struct StepsProgressCard: View {
     var entry: TrackerDayEntry
-    var authorizationState: HealthAuthorizationState
     var syncingFromHealth: Bool
-    var onRequestPermission: () -> Void
     var onSync: () -> Void
 
     var body: some View {
@@ -256,48 +559,23 @@ struct StepsProgressCard: View {
             HStack {
                 Label("Steps", systemImage: "figure.walk")
                 Spacer()
-                if syncingFromHealth, authorizationState == .authorized {
+                if syncingFromHealth {
                     Label("Health on", systemImage: "waveform.path.ecg")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            switch authorizationState {
-            case .authorized:
-                Text("\(entry.steps) / \(entry.stepGoal) suggested")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            Text("\(entry.steps) / \(entry.stepGoal) suggested")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
-                ProgressView(value: Double(entry.steps), total: Double(entry.stepGoal))
+            ProgressView(value: Double(entry.steps), total: Double(entry.stepGoal))
 
-                Button(action: onSync) {
-                    Label("Refresh from Health", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-            case .denied:
-                Text("Health access denied. Turn on permissions in Settings to pull steps.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Button(action: onRequestPermission) {
-                    Label("Request Health Access", systemImage: "heart")
-                }
-                .buttonStyle(.bordered)
-            case .unavailable:
-                Text("Health data isn't available on this device.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            case .unknown, .notDetermined:
-                Text("Connect to Health to pull today's step count.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Button(action: onRequestPermission) {
-                    Label("Request Health Access", systemImage: "heart")
-                }
-                .buttonStyle(.borderedProminent)
+            Button(action: onSync) {
+                Label("Refresh from Health", systemImage: "arrow.clockwise")
             }
+            .buttonStyle(.bordered)
         }
         .padding()
         .background(.thinMaterial)
@@ -848,15 +1126,6 @@ struct SettingsView: View {
                 Toggle("Write weight to Health", isOn: $store.pushWeightToHealth)
                 Toggle("Enable iCloud sync", isOn: $store.cloudSyncEnabled)
                 Toggle("Share roll-ups between profiles", isOn: $store.sharedRollupsEnabled)
-
-                Button {
-                    store.requestHealthAuthorization()
-                } label: {
-                    Label("Request Health Access", systemImage: "heart")
-                }
-                .disabled(store.healthAuthorizationState == .authorized)
-                .buttonStyle(.bordered)
-                .padding(.top, 4)
             }
         }
         .navigationTitle("Settings")
@@ -909,6 +1178,14 @@ struct ProfileEditor: View {
         .onChange(of: profile.startingWeight) { newValue in
             profile.targetWaterOz = Int((newValue * 0.5).rounded())
         }
+    }
+}
+
+private extension Date {
+    var shortWeekday: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "E"
+        return formatter.string(from: self)
     }
 }
 
