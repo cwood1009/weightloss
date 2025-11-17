@@ -1,10 +1,3 @@
-//
-//  ContentView.swift
-//  Weight
-//
-//  Created by Chris Wood on 11/16/25.
-//
-
 import SwiftUI
 import Combine
 #if canImport(HealthKit)
